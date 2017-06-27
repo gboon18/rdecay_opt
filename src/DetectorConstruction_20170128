@@ -1,0 +1,491 @@
+//
+// ********************************************************************
+// * License and Disclaimer                                           *
+// *                                                                  *
+// * The  Geant4 software  is  copyright of the Copyright Holders  of *
+// * the Geant4 Collaboration.  It is provided  under  the terms  and *
+// * conditions of the Geant4 Software License,  included in the file *
+// * LICENSE and available at  http://cern.ch/geant4/license .  These *
+// * include a list of copyright holders.                             *
+// *                                                                  *
+// * Neither the authors of this software system, nor their employing *
+// * institutes,nor the agencies providing financial support for this *
+// * work  make  any representation or  warranty, express or implied, *
+// * regarding  this  software system or assume any liability for its *
+// * use.  Please see the license in the file  LICENSE  and URL above *
+// * for the full disclaimer and the limitation of liability.         *
+// *                                                                  *
+// * This  code  implementation is the result of  the  scientific and *
+// * technical work of the GEANT4 collaboration.                      *
+// * By using,  copying,  modifying or  distributing the software (or *
+// * any work based  on the software)  you  agree  to acknowledge its *
+// * use  in  resulting  scientific  publications,  and indicate your *
+// * acceptance of all terms of the Geant4 Software license.          *
+// ********************************************************************
+//
+/// \file DetectorConstruction.cc
+/// \brief Implementation of the DetectorConstruction class
+//
+// $Id: DetectorConstruction.cc 70755 2013-06-05 12:17:48Z ihrivnac $
+//
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+#include "DetectorConstruction.hh"
+#include "DetectorMessenger.hh"
+
+#include "G4Material.hh"
+#include "G4NistManager.hh"
+
+#include "G4Tubs.hh"
+#include "G4LogicalVolume.hh"
+#include "G4PVPlacement.hh"
+
+#include "G4GeometryManager.hh"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4LogicalVolumeStore.hh"
+#include "G4SolidStore.hh"
+#include "G4RunManager.hh"
+
+#include "G4SystemOfUnits.hh"
+#include "G4PhysicalConstants.hh"
+#include "G4UnitsTable.hh"
+
+//added 20170128
+#include "G4Box.hh"
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+DetectorConstruction::DetectorConstruction()
+:G4VUserDetectorConstruction(),
+ fTargetMater(0), fLogicTarget(0),
+ fDetectorMater(0), fLogicDetector(0),
+ lCryst(0),//added20170128
+ fWorldMater(0), fPhysiWorld(0),
+ /*
+ fCheckOverlaps(true)
+{
+  DefineMaterials();
+  },*/
+ fDetectorMessenger(0)
+{
+  fTargetLength      = 4.6*cm; 
+  fTargetRadius      = 2.3*cm;
+  fDetectorLength    = 5*cm; 
+  fDetectorThickness = 2*cm;
+
+  // fWorldLength = std::max(fTargetLength,fDetectorLength);//20170128 deleted
+  //  fWorldRadius = 2.0*(fTargetRadius + fDetectorThickness);//20170128 deleted
+  DefineMaterials();//20170128 deleted
+  fDetectorMessenger = new DetectorMessenger(this);
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+DetectorConstruction::~DetectorConstruction()
+{ delete fDetectorMessenger;}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4VPhysicalVolume* DetectorConstruction::Construct()
+{
+  return ConstructVolumes();
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::DefineMaterials()
+{
+  // build materials
+  //
+  fDetectorMater = 
+  new G4Material("Germanium", 32, 72.61*g/mole, 5.323*g/cm3);
+  
+
+  G4Element* N  = new G4Element("Nitrogen", "N", 7, 14.01*g/mole);
+  G4Element* O  = new G4Element("Oxygen",   "O", 8, 16.00*g/mole);
+  //
+  G4int ncomponents; G4double fractionmass;      
+  G4Material* Air20 = new G4Material("Air", 1.205*mg/cm3, ncomponents=2,
+                      kStateGas, 293.*kelvin, 1.*atmosphere);
+    Air20->AddElement(N, fractionmass=0.7);
+    Air20->AddElement(O, fractionmass=0.3);
+  //
+  fWorldMater = Air20;
+  
+  // or use G4 materials data base
+  //
+  G4NistManager* man = G4NistManager::Instance();  
+  fTargetMater = man->FindOrBuildMaterial("G4_CESIUM_IODIDE");
+                   
+ ///G4cout << *(G4Material::GetMaterialTable()) << G4endl;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4VPhysicalVolume* DetectorConstruction::ConstructVolumes()
+{
+  // Cleanup old geometry
+  G4GeometryManager::GetInstance()->OpenGeometry();
+  G4PhysicalVolumeStore::GetInstance()->Clean();
+  G4LogicalVolumeStore::GetInstance()->Clean();
+  G4SolidStore::GetInstance()->Clean();
+
+G4int array = 3; //number of arrays
+G4double fDetectorX = 5.*cm, fDetectorY = 5.*cm, fDetectorZ = 5.*cm;//size of each detector
+G4double  fDetectorWholeX = (fDetectorX)*array;
+G4double  fDetectorWholeY = (fDetectorY)*array;
+G4double  fDetectorWholeZ = (fDetectorZ)*array;//Whole size of the big detector
+
+
+  
+  //     
+  // World//from B3a, 20170128
+  //
+  G4double world_sizeXY = 2.4*fDetectorWholeX;
+  G4double world_sizeZ  = 1.2*fDetectorWholeZ;
+  
+  G4Box* sWorld =
+    new G4Box("World",0.5*world_sizeXY, 0.5*world_sizeXY, 0.5*world_sizeZ); //its size
+ 			   
+  G4LogicalVolume* lWorld =                         
+    new G4LogicalVolume(sWorld,          //its solid
+                        fWorldMater,         //its material
+                        "World");            //its name
+                                   
+  fPhysiWorld = 
+    new G4PVPlacement(0,                     //no rotation
+                      G4ThreeVector(),       //at (0,0,0)
+                      lWorld,            //its logical volume
+                      "World",               //its name
+                      0,                     //its mother  volume
+                      false,                 //no boolean operation
+                      0,                     //copy number
+                      fCheckOverlaps);       // checking overlaps 
+  ////////////////////////////////////////////////////////////////////
+  
+  // Target
+  //
+  G4Tubs* 
+  sTarget = new G4Tubs("Target",                                   //name
+                  0., fTargetRadius, 0.5*fTargetLength, 0.,twopi); //dimensions
+
+
+  fLogicTarget = new G4LogicalVolume(sTarget,           //shape
+                             fTargetMater,              //material
+                             "Target");                 //name
+                               
+           new G4PVPlacement(0,                         //no rotation
+                           G4ThreeVector(),             //at (0,0,0)
+                           fLogicTarget,                //logical volume
+                           "Target",                    //name
+                           lWorld,                      //mother  volume
+                           false,                       //no boolean operation
+                           0);                          //copy number
+
+	     
+  //Small Each Detector
+  //
+
+  G4double gap = 0.5*mm; //a gap for wrapping
+  G4double dX = fDetectorX - gap, dY = fDetectorY - gap, dZ = fDetectorZ - gap;
+  
+  G4Box* 
+  sCryst = new G4Box("crystal",  
+			0.5*dX,0.5*dY,0.5*dZ);
+
+
+  lCryst = new G4LogicalVolume(sCryst,       //shape
+                             fDetectorMater,            //material
+                             "crystalLV");               //name
+	    /* 
+           new G4PVPlacement(0,                         //no rotation
+                           G4ThreeVector(),             //at (0,0,0)
+                           fLogicDetector,              //logical volume
+                           "Detector",                  //name
+                           lWorld,                      //mother  volume
+                           false,                       //no boolean operation
+                           0);                          //copy number
+
+  */
+
+
+	   
+  //Big Whole Detector 20170128
+
+  
+  G4Box* sDetector = new G4Box("Detector", 0.5*fDetectorWholeX, 0.5*fDetectorWholeY, 0.5*fDetectorWholeZ);
+  fLogicDetector = new G4LogicalVolume(sDetector,fWorldMater,"Detector");
+
+  //now, place small detectors in the big whole detector
+  G4double fPositionX = -0.5*(fDetectorWholeX+fDetectorX);
+  G4double fPositionY;
+  G4double fPositionZ;
+  // G4double fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+  // G4double fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+  //G4int x;
+  G4int y;
+  G4int z;
+  G4int i = 0;
+
+  //   for(G4int x = 0 ; x < array ; x++) {
+        fPositionX = fPositionX + fDetectorX;
+        fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+        fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	for(y = 0 ; y < array ; y++) {
+            fPositionY = fPositionY + fDetectorY;
+            fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	     for(z = 0 ; z < array ; z++) {
+		    fPositionZ = fPositionZ + fDetectorZ;
+	    new G4PVPlacement(0,
+		              G4ThreeVector(fPositionX,fPositionY,fPositionZ),
+			      lCryst,
+			      "s_crystal",
+			      fLogicDetector,
+			      false,
+			      i,
+			      fCheckOverlaps);
+	      i++;
+	      }
+	}
+	//  } 
+	
+        fPositionX = -0.5*(fDetectorWholeX+fDetectorX);
+        fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+        fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+        fPositionX = fPositionX + 3*fDetectorX;
+	for(y = 0 ; y < array ; y++) {
+            fPositionY = fPositionY + fDetectorY;
+            fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	    for(z = 0 ; z < array ; z++) {
+		    fPositionZ = fPositionZ + fDetectorZ;
+	    new G4PVPlacement(0,
+		              G4ThreeVector(fPositionX,fPositionY,fPositionZ),
+			      lCryst,
+			      "s_crystal",
+			      fLogicDetector,
+			      false,
+			      i,
+			      fCheckOverlaps);
+	      i++;
+	      }
+	}
+
+	
+	//avoid the target detector area and the beam coming area////////////////////// 
+	fPositionX = -0.5*(fDetectorWholeX+fDetectorX);
+        fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+        fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	fPositionX = fPositionX + 2*fDetectorX;
+	fPositionZ = fPositionZ + 3*fDetectorZ;
+	for(y = 0 ; y < array ; y++) {
+	  fPositionY = fPositionY + fDetectorY;
+	  	    new G4PVPlacement(0,
+		              G4ThreeVector(fPositionX,fPositionY,fPositionZ),
+			      lCryst,
+			      "s_crystal",
+			      fLogicDetector,
+			      false,
+			      i,
+			      fCheckOverlaps);
+		    i++;
+	}
+	
+	fPositionX = -0.5*(fDetectorWholeX+fDetectorX);
+        fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+        fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	fPositionX = fPositionX + 2*fDetectorX;
+	fPositionY = fPositionY + 3*fDetectorY;
+	for(z = 0 ; z < array - 1 ; z++) {
+	  fPositionZ = fPositionZ + fDetectorZ;
+		  	    new G4PVPlacement(0,
+		              G4ThreeVector(fPositionX,fPositionY,fPositionZ),
+			      lCryst,
+			      "s_crystal",
+			      fLogicDetector,
+			      false,
+			      i,
+			      fCheckOverlaps);
+		    i++;
+	}
+	
+		fPositionX = -0.5*(fDetectorWholeX+fDetectorX);
+        fPositionY = -0.5*(fDetectorWholeY+fDetectorY);
+        fPositionZ = -0.5*(fDetectorWholeZ+fDetectorZ);
+	fPositionX = fPositionX + 2*fDetectorX;
+	fPositionY = fPositionY + fDetectorY;
+	for(z = 0 ; z < array - 1 ; z++) {
+	  fPositionZ = fPositionZ + fDetectorZ;
+		  	    new G4PVPlacement(0,
+		              G4ThreeVector(fPositionX,fPositionY,fPositionZ),
+			      lCryst,
+			      "s_crystal",
+			      fLogicDetector,
+			      false,
+			      i,
+			      fCheckOverlaps);
+		    i++;
+	}
+	
+	/////////////////////////////////////////////////////////////////////////////////////////
+  new G4PVPlacement(0,
+		    G4ThreeVector(),
+	            fLogicDetector,
+		    "Detector",
+		    lWorld,
+		    false,
+		    0,
+		    fCheckOverlaps);
+			      
+  //////////////////////////////////////////////////			      
+	   
+
+  
+  
+  PrintParameters();
+  
+  //always return the root volume
+  //
+  return fPhysiWorld;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::PrintParameters()
+{
+  G4cout << "\n Target : Length = " << G4BestUnit(fTargetLength,"Length")
+         << " Radius = " << G4BestUnit(fTargetRadius,"Length")  
+         << " Material = " << fTargetMater->GetName();
+  G4cout << "\n Detector : Length = " << G4BestUnit(fDetectorLength,"Length")
+         << " Tickness = " << G4BestUnit(fDetectorThickness,"Length")  
+         << " Material = " << fDetectorMater->GetName() << G4endl;          
+  G4cout << "\n" << fTargetMater << "\n" << fDetectorMater << G4endl;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetTargetMaterial(G4String materialChoice)
+{
+  // search the material by its name
+  G4Material* pttoMaterial =
+     G4NistManager::Instance()->FindOrBuildMaterial(materialChoice);   
+  
+  if (pttoMaterial) { 
+    fTargetMater = pttoMaterial;
+    if(fLogicTarget) { fLogicTarget->SetMaterial(fTargetMater); }
+    G4RunManager::GetRunManager()->PhysicsHasBeenModified();
+  } else {
+    G4cout << "\n--> warning from DetectorConstruction::SetTargetMaterial : "
+           << materialChoice << " not found" << G4endl;
+  }              
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetDetectorMaterial(G4String materialChoice)
+{
+  // search the material by its name
+  G4Material* pttoMaterial =
+     G4NistManager::Instance()->FindOrBuildMaterial(materialChoice);   
+  
+  if (pttoMaterial) { 
+    fDetectorMater = pttoMaterial;
+    if(fLogicDetector) { fLogicDetector->SetMaterial(fDetectorMater); }
+    G4RunManager::GetRunManager()->PhysicsHasBeenModified();
+  } else {
+    G4cout << "\n--> warning from DetectorConstruction::SetDetectorMaterial : "
+           << materialChoice << " not found" << G4endl;
+  }              
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetTargetRadius(G4double value)
+{
+  fTargetRadius = value;
+  G4RunManager::GetRunManager()->ReinitializeGeometry();
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetTargetLength(G4double value)
+{
+  fTargetLength = value;
+  G4RunManager::GetRunManager()->ReinitializeGeometry();
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetDetectorThickness(G4double value)
+{
+  fDetectorThickness = value;
+  G4RunManager::GetRunManager()->ReinitializeGeometry();
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void DetectorConstruction::SetDetectorLength(G4double value)
+{
+  fDetectorLength = value;
+  G4RunManager::GetRunManager()->ReinitializeGeometry();
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4double DetectorConstruction::GetTargetLength()
+{
+  return fTargetLength;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4double DetectorConstruction::GetTargetRadius()
+{
+  return fTargetRadius;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4Material* DetectorConstruction::GetTargetMaterial()
+{
+  return fTargetMater;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4LogicalVolume* DetectorConstruction::GetLogicTarget()
+{
+  return fLogicTarget;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4double DetectorConstruction::GetDetectorLength()
+{
+  return fDetectorLength;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4double DetectorConstruction::GetDetectorThickness()
+{
+  return fDetectorThickness;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4Material* DetectorConstruction::GetDetectorMaterial()
+{
+  return fDetectorMater;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+G4LogicalVolume* DetectorConstruction::GetLogicDetector()
+{
+  // return fLogicDetector;//deleted 20170128
+  return lCryst;//20170128
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......

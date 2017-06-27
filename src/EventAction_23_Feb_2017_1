@@ -1,0 +1,325 @@
+//
+// ********************************************************************
+// * License and Disclaimer                                           *
+// *                                                                  *
+// * The  Geant4 software  is  copyright of the Copyright Holders  of *
+// * the Geant4 Collaboration.  It is provided  under  the terms  and *
+// * conditions of the Geant4 Software License,  included in the file *
+// * LICENSE and available at  http://cern.ch/geant4/license .  These *
+// * include a list of copyright holders.                             *
+// *                                                                  *
+// * Neither the authors of this software system, nor their employing *
+// * institutes,nor the agencies providing financial support for this *
+// * work  make  any representation or  warranty, express or implied, *
+// * regarding  this  software system or assume any liability for its *
+// * use.  Please see the license in the file  LICENSE  and URL above *
+// * for the full disclaimer and the limitation of liability.         *
+// *                                                                  *
+// * This  code  implementation is the result of  the  scientific and *
+// * technical work of the GEANT4 collaboration.                      *
+// * By using,  copying,  modifying or  distributing the software (or *
+// * any work based  on the software)  you  agree  to acknowledge its *
+// * use  in  resulting  scientific  publications,  and indicate your *
+// * acceptance of all terms of the Geant4 Software license.          *
+// ********************************************************************
+//
+/// \file EventAction.cc
+/// \brief Implementation of the EventAction class
+//
+// $Id: EventAction.cc 76293 2013-11-08 13:11:23Z gcosmo $
+//
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+#include "EventAction.hh"
+
+#include "Run.hh"
+#include "HistoManager.hh"
+
+#include "G4Event.hh"
+#include "G4RunManager.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4UnitsTable.hh"
+
+//20170206///////////////////////////
+#include "G4TrajectoryContainer.hh"
+/////////////////////////////////////
+//20170207///////////////////////////
+#include "G4VTrajectoryPoint.hh"//forward declaration of 'G4VTrajectoryPoint' to "GetPoint(0)->GetPosition();"
+/////////////////////////////////////
+
+//20170512
+#include "Par02Smearer.hh"
+//20170512
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+EventAction::EventAction()
+:G4UserEventAction(),
+ fEdep1(0.), fEdep2(0.), fWeight1(0.), fWeight2(0.),
+ //20170223///////////////////////////////////////////////
+ // fEdep_[16](0.), fWeight_[16](0.),//i do not know why we do this procedure, it compiles without this.
+ /////////////////////////////////////////////////////////
+ 
+ fTime0(-1*s)
+{ } 
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+EventAction::~EventAction()
+{ }
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+void EventAction::BeginOfEventAction(const G4Event*)
+{
+  fEdep1 = fEdep2 = fWeight1 = fWeight2 = 0.;
+  //20170223///////////////////////////////////////////
+  for(G4int i = 0 ; i < 16 ; i++){
+    fEdep_[i] = fWeight_[i] = 0.;
+  }
+  /////////////////////////////////////////////////////
+  fTime0 = -1*s;
+}
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+/*20170512//moved to SteppingAction.cc
+void EventAction::AddEdep(G4int iVol, G4double edep,
+                                      G4double time, G4double weight)
+{
+    // initialize t0
+  if (fTime0 < 0.) fTime0 = time;
+
+  // out of time window ?
+  const G4double TimeWindow (1*microsecond);
+  if (std::fabs(time - fTime0) > TimeWindow) return;
+
+  if (iVol == 1) { fEdep1 += edep; fWeight1 += edep*weight;}
+  if (iVol == 2) { fEdep2 += edep; fWeight2 += edep*weight;}
+}
+
+  //////////////////////////////////////////
+  //20170223/////////////////////////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////
+void EventAction::AddEdep2(G4int Vol, G4double edep,
+                                      G4double time, G4double weight)
+{
+  G4int totCryst = 16;
+  // initialize t0
+  if (fTime0 < 0.) fTime0 = time;
+  
+  // out of time window ?
+  const G4double TimeWindow (1*microsecond);
+  if (std::fabs(time - fTime0) > TimeWindow) return;
+
+  for(G4int i = 0 ; i < totCryst ; i++){
+    if (Vol == i + 1){fEdep_[i] += edep; fWeight_[i] += edep*weight;}
+  }
+}
+*/
+
+  //////////////////////////////////////////
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+//void EventAction::EndOfEventAction(const G4Event*)
+void EventAction::EndOfEventAction(const G4Event* evt)//for trajectoryContainer 20170206
+{
+ G4AnalysisManager* analysisManager = G4AnalysisManager::Instance();
+ 
+ G4double Etot = fEdep1 + fEdep2;
+ G4double Wtot = (fWeight1 + fWeight2)/Etot;
+ 
+ // pulse height in target
+ //
+ if (fEdep1 > 0.) {
+   fWeight1 /= fEdep1; // fWeight1 = fWeight1/fEdep1
+   analysisManager->FillH1(0, fEdep1, fWeight1);   //   analysisManager->FillH1(id = 0, fEdep1, fWeight1);   
+ }
+
+ /*20170512//deleted to make total pulse height with fEdep2_[i]
+ // pulse height in detector
+ //   
+ if (fEdep2 > 0.) {
+
+   
+   //This works beautifully, I'm gonna use it for each detectors i.e. fEdep_[i]
+   //20170512
+   //G4double fEdep3;
+   //fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,0.2);
+   //20170512
+   
+   
+   fWeight2 /= fEdep2;
+   analysisManager->FillH1(1, fEdep2, fWeight2);//saving evergy deposition in histogram of the detectors(total)//20170512
+   //analysisManager->FillH1(1, fEdep3, fWeight2);//saving evergy deposition in histogram of the detectors(total)//20170512
+   //20170224//////////////////////////////to save energy deposition in tree of the detectors(total)
+   G4int id = 10;
+   analysisManager->FillNtupleDColumn(id,0, fEdep2);
+   analysisManager->FillNtupleDColumn(id,1, fEdep3);//20170512
+   analysisManager->FillNtupleDColumn(id,2, fWeight2);
+   //   analysisManager->FillNtupleDColumn(id,2, i);
+   analysisManager->AddNtupleRow(id);
+   ////////////////////////////////////////////////////////////////////////////////////////////
+  
+ }
+ */
+
+ // total
+ //
+ analysisManager->FillH1(2, Etot, Wtot);
+ 
+ // threshold in target and detector        
+ const G4double Threshold1(10*keV), Threshold2(10*keV);
+  
+ //coincidence, anti-coincidences 
+ //  
+ G4bool coincidence       = ((fEdep1 >= Threshold1) && (fEdep2 >= Threshold2));
+ G4bool anti_coincidence1 = ((fEdep1 >= Threshold1) && (fEdep2 <  Threshold2));
+ G4bool anti_coincidence2 = ((fEdep1 <  Threshold1) && (fEdep2 >= Threshold2)); 
+
+ if (coincidence)       analysisManager->FillH1(3, fEdep2, fWeight2);
+ if (anti_coincidence1) analysisManager->FillH1(4, fEdep1, fWeight1);
+ if (anti_coincidence2) analysisManager->FillH1(5, fEdep2, fWeight2); 
+
+ // pass energies to Run
+ //  
+ Run* run = static_cast<Run*>(
+            G4RunManager::GetRunManager()->GetNonConstCurrentRun());
+             
+ run->AddEdep (fEdep1, fEdep2);             
+
+ ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   // get number of stored trajectories
+   ////This has to be turned on from TrackingAction.cc fpTrackingManager->SetStoreTrajectory(true);//////////////20170206
+  G4TrajectoryContainer* trajectoryContainer = evt->GetTrajectoryContainer();
+  /////////////////////////////////////////////////////////////////////////////
+  G4int n_trajectories = 0;
+  
+  if (trajectoryContainer) n_trajectories = trajectoryContainer->entries();
+  
+  //  G4cout<<"################################################################"<<G4endl;
+  //  G4cout<<"trajectoryContainer : "<<trajectoryContainer<<G4endl;
+  //  G4cout<<"################################################################"<<G4endl;
+  //  G4cout<<"################################################################"<<G4endl;
+  //  G4cout<<"n_trajectories : "<<n_trajectories<<G4endl;
+  //  G4cout<<"################################################################"<<G4endl;
+  ///20170202 get trajectory////////////////////////////
+  ///20170206 get trajectory////////////////////////////
+  ///20170207 moved to EventAction.cc from SteppingAction.cc////////////////////////////
+    for(G4int i = 0 ; i < n_trajectories ; i++)
+    {
+        G4VTrajectory* trajectory = (*trajectoryContainer)[i];
+	G4int trackID = (int)trajectory->GetTrackID();
+	G4int PatrackID = (int)trajectory->GetParentID();//what?? this works?? somehow it works
+	G4int pid = trajectory->GetPDGEncoding();
+	//G4int papid = (int)trajectory->GetParentID();
+	G4int endP = trajectory->GetPointEntries() -1;
+	//	G4cout<<"i : "<<i<<", endP : "<<endP<<G4endl;
+  // G4VTrajectoryPoint* point0 = trajectory->GetPoint(0);
+  // G4VTrajectoryPoint* pointa = trajectory->GetPoint(endP);
+  
+  G4ThreeVector position0 = trajectory->GetPoint(0)->GetPosition();
+  G4ThreeVector positiona = trajectory->GetPoint(endP)->GetPosition();
+  G4ThreeVector momentum0 = trajectory->GetInitialMomentum();
+
+  //  G4cout<<"i : "<<i<<", position0.x() : "<<position0.x()<<", positiona.x() : "<<positiona.x()<<G4endl;
+
+ ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /*
+  const G4ParticleDefinition* particle;
+  G4int Z = particle->GetParticleDefinition()->GetAtomicNumber();
+  G4int A = particle->GetParticleDefinition()->GetAtomicMass();
+  */
+
+  G4int id = 9;
+  analysisManager->FillNtupleDColumn(id,0, double(pid));
+  //  analysisManager->FillNtupleDColumn(id,1, double(Z));
+  //  analysisManager->FillNtupleDColumn(id,2, double(A));
+  analysisManager->FillNtupleDColumn(id,1, position0.x());
+  analysisManager->FillNtupleDColumn(id,2, position0.y());
+  analysisManager->FillNtupleDColumn(id,3, position0.z());
+  analysisManager->FillNtupleDColumn(id,4, positiona.x());
+  analysisManager->FillNtupleDColumn(id,5, positiona.y());
+  analysisManager->FillNtupleDColumn(id,6, positiona.z());
+  analysisManager->FillNtupleDColumn(id,7, momentum0.x());
+  analysisManager->FillNtupleDColumn(id,8, momentum0.y());
+  analysisManager->FillNtupleDColumn(id,9, momentum0.z());
+  analysisManager->FillNtupleDColumn(id,10, trackID);
+  analysisManager->FillNtupleDColumn(id,11, PatrackID);
+  analysisManager->FillNtupleDColumn(id,12, i);
+  analysisManager->AddNtupleRow(id);
+  
+  // G4cout<<"shit : "<<i<<G4endl;
+  
+    } 
+    /*20170512//moved to SteppingAction.cc
+//20170512
+G4int totCryst = 16;
+for(G4int i = 0 ; i < totCryst ; i++){
+  if(fEdep_[i] < 0.233)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.14/2.335);
+  else if(0.233 <= fEdep_[i] && fEdep_[i] < 0.422)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.095/2.335);
+  else if(0.422 <= fEdep_[i] && fEdep_[i] < 0.580)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.085/2.335);
+  else if(0.580 <= fEdep_[i] && fEdep_[i] < 0.917)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.075/2.335);
+  else if(0.917 <= fEdep_[i] && fEdep_[i] < 1.400)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.06/2.335);
+  else if(1.400 <= fEdep_[i] && fEdep_[i] < 2.000)   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.05/2.335);
+  else if(2.000 <= fEdep_[i])   fEdep2_[i] = Par02Smearer::Instance()->Gauss(fEdep_[i],fEdep_[i]*0.03/2.335);
+    }
+//20170512
+   
+ //20170223//////////////////////////////////////////////
+ //energy deposition in each detectors copyNo   
+
+   for(G4int i = 0 ; i < 16 ; i++){
+      G4int id = 11 + i ;
+      if (fEdep_[i] > 0.) {
+      fWeight_[i] /= fEdep_[i];
+    
+   analysisManager->FillH1(i + 7, fEdep2_[i], fWeight_[i]);//id=7~
+   analysisManager->FillNtupleDColumn(id,0, fEdep_[i]);//id=11~
+   analysisManager->FillNtupleDColumn(id,1, fEdep2_[i]);//20170512
+   analysisManager->FillNtupleDColumn(id,2, fWeight_[i]);
+   //   analysisManager->FillNtupleDColumn(id,2, i);//tried to save all the energy deposit of each detectors in one tree. but made each trees and made T_tot(save everything in one tree) instead.
+   analysisManager->AddNtupleRow(id);
+      }
+   }
+    */
+   /*20170512//moved to SteppingAction.cc
+   //20170512
+   //The Total Pulse height inside the detector
+   //20170512//deleted to make total pulse height with fEdep2_[i]//however, this is totally wrong, needs to be fixed. needs to use the smearing in right way.
+ // pulse height in detector
+ //   
+ if (fEdep2 > 0.) {
+   //20170512
+  if(fEdep2 < 0.233)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.14/2.335);
+  else if(0.233 <= fEdep2 && fEdep2 < 0.422)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.095/2.335);
+  else if(0.422 <= fEdep2 && fEdep2 < 0.580)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.085/2.335);
+  else if(0.580 <= fEdep2 && fEdep2 < 0.917)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.075/2.335);
+  else if(0.917 <= fEdep2 && fEdep2 < 1.400)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.06/2.335);
+  else if(1.400 <= fEdep2 && fEdep2 < 2.000)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.05/2.335);
+  else if(2.000 <= fEdep2)   fEdep3 = Par02Smearer::Instance()->Gauss(fEdep2,fEdep2*0.03/2.335);
+ }
+//20170512
+   
+   fWeight2 /= fEdep3;
+   analysisManager->FillH1(1, fEdep3, fWeight2);//saving evergy deposition in histogram of the detectors(total)//20170512
+   //analysisManager->FillH1(1, fEdep3, fWeight2);//saving evergy deposition in histogram of the detectors(total)//20170512
+   //20170224//////////////////////////////to save energy deposition in tree of the detectors(total)
+   G4int id = 10;
+   analysisManager->FillNtupleDColumn(id,0, fEdep2);
+   analysisManager->FillNtupleDColumn(id,1, fEdep3);//20170512
+   analysisManager->FillNtupleDColumn(id,2, fWeight2);
+   //   analysisManager->FillNtupleDColumn(id,2, i);
+   analysisManager->AddNtupleRow(id);
+   ////////////////////////////////////////////////////////////////////////////////////////////
+   */
+}
+
+    ////////////////////////////////////////////////////////////
+
+
+//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+
+
